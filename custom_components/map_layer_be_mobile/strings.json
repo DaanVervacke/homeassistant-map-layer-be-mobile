@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Map Layer Be-Mobile",
+        "description": "Set up the Be-Mobile traffic map-layer provider."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Map Layer Be-Mobile is already configured."
+    }
+  }
+}

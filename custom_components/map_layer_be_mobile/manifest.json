@@ -1,0 +1,14 @@
+{
+  "domain": "map_layer_be_mobile",
+  "name": "Map Layer Be-Mobile",
+  "dependencies": [
+    "map_layer"
+  ],
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/benjamin-pilgrim/homeassistant-map-layer-be-mobile",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/benjamin-pilgrim/homeassistant-map-layer-be-mobile/issues",
+  "requirements": [],
+  "version": "0.0.1"
+}
