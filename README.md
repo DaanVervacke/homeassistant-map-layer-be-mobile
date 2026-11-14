@@ -33,6 +33,27 @@ so overlays stay usable at every zoom level.
 The traffic layers exist up to zoom 15 and are upscaled up to the card's
 zoom 19 ceiling. The basemap exists up to zoom 19.
 
+## Dashboard card
+
+Card overlays default to 65 percent opacity, which washes out the basemap
+when it is enabled as a layer. Pin the basemap to full opacity and show the
+delay layer like this:
+
+```yaml
+type: custom:map-layer-card
+title: Map Layers
+center: [50.85, 4.35]
+zoom: 9
+visible_layers:
+  - be_mobile/basemap
+  - be_mobile/delay
+layers:
+  - key: be_mobile/basemap
+    opacity: 1
+  - key: be_mobile/delay
+    opacity: 0.8
+```
+
 ## Development
 
 Run tests with the core map-layer repo on `PYTHONPATH`:
