@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import unittest
 
+from custom_components.map_layer import MemoryTileCache
 from custom_components.map_layer_be_mobile.provider import (
     BE_MOBILE_ATTRIBUTION,
     BE_MOBILE_BASEMAP_ATTRIBUTION,
@@ -204,6 +205,72 @@ class BeMobileProviderTest(unittest.TestCase):
         )
 
         self.assertEqual(tile.status, 502)
+
+    def test_repeated_tile_requests_serve_from_memory_cache(self) -> None:
+        session = FakeSession(FakeResponse(body=b"\x89PNG"))
+        provider = BeMobileProvider(session)
+
+        first = asyncio.run(
+            provider.async_get_tile(
+                "speed", z=8, x=131, y=85, dimensions={}, options={}
+            )
+        )
+        second = asyncio.run(
+            provider.async_get_tile(
+                "speed", z=8, x=131, y=85, dimensions={}, options={}
+            )
+        )
+
+        self.assertEqual(len(session.urls), 1)
+        self.assertEqual(first.content, second.content)
+
+    def test_memory_cache_expires_per_layer(self) -> None:
+        clock = [0.0]
+        cache = MemoryTileCache(max_entries=16, monotonic=lambda: clock[0])
+        session = FakeSession(FakeResponse(body=b"\x89PNG"))
+        provider = BeMobileProvider(session, tile_cache=cache)
+
+        def fetch(layer_id: str) -> None:
+            asyncio.run(
+                provider.async_get_tile(
+                    layer_id, z=8, x=131, y=85, dimensions={}, options={}
+                )
+            )
+
+        fetch("speed")
+        fetch("speed")
+        self.assertEqual(len(session.urls), 1)
+
+        clock[0] += 61
+        fetch("speed")
+        self.assertEqual(len(session.urls), 2)
+
+        fetch("basemap")
+        fetch("basemap")
+        self.assertEqual(len(session.urls), 3)
+
+        clock[0] += 61
+        fetch("basemap")
+        self.assertEqual(len(session.urls), 3)
+
+    def test_failed_tiles_are_not_cached(self) -> None:
+        session = FakeSession(FakeResponse(status=500))
+        provider = BeMobileProvider(session)
+
+        first = asyncio.run(
+            provider.async_get_tile(
+                "speed", z=8, x=131, y=85, dimensions={}, options={}
+            )
+        )
+        second = asyncio.run(
+            provider.async_get_tile(
+                "speed", z=8, x=131, y=85, dimensions={}, options={}
+            )
+        )
+
+        self.assertEqual(len(session.urls), 2)
+        self.assertEqual(first.status, 502)
+        self.assertEqual(second.status, 502)
 
 
 class BeMobileTileUrlTest(unittest.TestCase):

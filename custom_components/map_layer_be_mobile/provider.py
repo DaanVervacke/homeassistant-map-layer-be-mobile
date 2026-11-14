@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from custom_components.map_layer import MapLayerMetadata, TileResponse
+from custom_components.map_layer import (
+    MapLayerMetadata,
+    MemoryTileCache,
+    TileResponse,
+)
 
 
 class ClientSession(Protocol):
@@ -36,6 +40,8 @@ BE_MOBILE_TRAFFIC_MAX_NATIVE_ZOOM = 15
 BE_MOBILE_BASEMAP_MAX_NATIVE_ZOOM = 19
 BE_MOBILE_TRAFFIC_CACHE_SECONDS = 60
 BE_MOBILE_BASEMAP_CACHE_SECONDS = 86400
+BE_MOBILE_BASEMAP_MEMORY_CACHE_SECONDS = 4 * 60 * 60
+BE_MOBILE_TILE_CACHE_ENTRIES = 256
 BE_MOBILE_REQUEST_TIMEOUT_SECONDS = 30
 
 
@@ -49,6 +55,7 @@ class BeMobileLayer:
     attribution: str
     max_native_zoom: int
     cache_seconds: int
+    memory_cache_seconds: int
 
 
 BE_MOBILE_LAYERS: tuple[BeMobileLayer, ...] = (
@@ -59,6 +66,7 @@ BE_MOBILE_LAYERS: tuple[BeMobileLayer, ...] = (
         attribution=BE_MOBILE_ATTRIBUTION,
         max_native_zoom=BE_MOBILE_TRAFFIC_MAX_NATIVE_ZOOM,
         cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
+        memory_cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
     ),
     BeMobileLayer(
         layer_id="jams",
@@ -67,6 +75,7 @@ BE_MOBILE_LAYERS: tuple[BeMobileLayer, ...] = (
         attribution=BE_MOBILE_ATTRIBUTION,
         max_native_zoom=BE_MOBILE_TRAFFIC_MAX_NATIVE_ZOOM,
         cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
+        memory_cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
     ),
     BeMobileLayer(
         layer_id="delay",
@@ -75,6 +84,7 @@ BE_MOBILE_LAYERS: tuple[BeMobileLayer, ...] = (
         attribution=BE_MOBILE_ATTRIBUTION,
         max_native_zoom=BE_MOBILE_TRAFFIC_MAX_NATIVE_ZOOM,
         cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
+        memory_cache_seconds=BE_MOBILE_TRAFFIC_CACHE_SECONDS,
     ),
     BeMobileLayer(
         layer_id="basemap",
@@ -83,6 +93,7 @@ BE_MOBILE_LAYERS: tuple[BeMobileLayer, ...] = (
         attribution=BE_MOBILE_BASEMAP_ATTRIBUTION,
         max_native_zoom=BE_MOBILE_BASEMAP_MAX_NATIVE_ZOOM,
         cache_seconds=BE_MOBILE_BASEMAP_CACHE_SECONDS,
+        memory_cache_seconds=BE_MOBILE_BASEMAP_MEMORY_CACHE_SECONDS,
     ),
 )
 
@@ -92,10 +103,21 @@ class BeMobileProvider:
 
     provider_id = BE_MOBILE_PROVIDER_ID
 
-    def __init__(self, session: ClientSession) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        *,
+        tile_cache: MemoryTileCache[tuple[str, int, int, int], TileResponse]
+        | None = None,
+    ) -> None:
         """Initialize the provider with a Home Assistant HTTP client session."""
 
         self._session = session
+        self._tile_cache = (
+            tile_cache
+            if tile_cache is not None
+            else MemoryTileCache(max_entries=BE_MOBILE_TILE_CACHE_ENTRIES)
+        )
 
     async def async_list_layers(self) -> list[MapLayerMetadata]:
         """Return public Be-Mobile layer metadata."""
@@ -134,6 +156,11 @@ class BeMobileProvider:
         if layer is None:
             return TileResponse(status=404)
 
+        cache_key = (layer.layer_id, z, x, y)
+        cached = self._tile_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         url = be_mobile_tile_url(layer, z=z, x=x, y=y)
         try:
             async with self._session.get(
@@ -150,7 +177,7 @@ class BeMobileProvider:
                 content_type = response.headers.get("Content-Type", "image/png").split(
                     ";", 1
                 )[0]
-                return TileResponse(
+                tile = TileResponse(
                     content=content,
                     content_type=content_type or "image/png",
                     cache_seconds=layer.cache_seconds,
@@ -158,6 +185,11 @@ class BeMobileProvider:
         except Exception:
             _LOGGER.debug("Be-Mobile tile request failed", exc_info=True)
             return TileResponse(status=502)
+
+        self._tile_cache.set(
+            cache_key, tile, ttl_seconds=layer.memory_cache_seconds
+        )
+        return tile
 
 
 def _client_timeout(total_seconds: int) -> Any:
